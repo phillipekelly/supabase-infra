@@ -1,0 +1,31 @@
+# Imgproxy - Image transformation
+# Receives from Kong and Storage
+# No direct DB access needed
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: imgproxy-network-policy
+  namespace: supabase
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: supabase-imgproxy
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: supabase-kong
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: supabase-storage
+      ports:
+        - port: 5001
+  egress:
+    - ports:
+        - port: 443  # S3 for fetching images
+        - port: 5000 # Storage service
+        - port: 53   # DNS
+          protocol: UDP

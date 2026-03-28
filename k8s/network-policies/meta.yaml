@@ -1,0 +1,30 @@
+# Meta (pg-meta)
+# Receives from Kong and Studio
+# Sends to Postgres only
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: meta-network-policy
+  namespace: supabase
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: supabase-meta
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: supabase-kong
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: supabase-studio
+      ports:
+        - port: 8080
+  egress:
+    - ports:
+        - port: 5432 # Postgres
+        - port: 53   # DNS
+          protocol: UDP

@@ -1,0 +1,28 @@
+# Functions (Edge Functions)
+# Receives from Kong only
+# Sends to Postgres and external APIs
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: functions-network-policy
+  namespace: supabase
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: supabase-functions
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: supabase-kong
+      ports:
+        - port: 9000
+  egress:
+    - ports:
+        - port: 5432 # Postgres
+        - port: 443  # External APIs
+        - port: 53   # DNS
+          protocol: UDP

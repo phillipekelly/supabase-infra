@@ -1,0 +1,33 @@
+# ==============================================================================
+# Sensitive Terraform Variables
+# Copy this file to terraform.tfvars and fill in REAL values
+# NEVER commit terraform.tfvars to Git - it is in .gitignore
+#
+# Non-sensitive variables are in terraform.tfvars.ci (committed to git)
+# Run plan with: terraform plan -var-file="terraform.tfvars.ci" -var-file="terraform.tfvars"
+# ==============================================================================
+
+# Database
+db_master_password = "your-secure-password-min-16-chars"
+
+# JWT Keys — generate at https://supabase.com/docs/guides/self-hosting/docker#generate-api-keys
+jwt_secret      = "your-super-secret-and-long-jwt-secret-min-32-chars"
+jwt_anon_key    = "your-jwt-anon-key"
+jwt_service_key = "your-jwt-service-key"
+
+# Studio Dashboard
+dashboard_username = "supabase"
+dashboard_password = "your-secure-dashboard-password"
+
+# Analytics (Logflare)
+analytics_public_token  = "your-super-secret-and-long-logflare-key-public-min-32-chars"
+analytics_private_token = "your-super-secret-and-long-logflare-key-private-min-32-chars"
+
+# Realtime
+realtime_secret_key_base = "your-super-secret-and-long-realtime-key-min-64-chars"
+
+# Meta
+meta_crypto_key = "your-super-secret-and-long-crypto-key-min-32-chars"
+
+# Optional - for HTTPS support via ACM
+# acm_certificate_arn = "arn:aws:acm:us-east-1:ACCOUNT:certificate/xxx"

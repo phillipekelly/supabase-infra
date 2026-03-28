@@ -1,0 +1,27 @@
+# Auth (GoTrue)
+# Receives from Kong only
+# Sends to Postgres only
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: auth-network-policy
+  namespace: supabase
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: supabase-auth
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: supabase-kong
+      ports:
+        - port: 9999
+  egress:
+    - ports:
+        - port: 5432 # Postgres
+        - port: 53   # DNS
+          protocol: UDP

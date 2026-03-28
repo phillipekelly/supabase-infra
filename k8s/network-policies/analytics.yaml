@@ -1,0 +1,30 @@
+# Analytics (Logflare)
+# Receives from Kong and Vector
+# Sends to Postgres only
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: analytics-network-policy
+  namespace: supabase
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: supabase-analytics
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: supabase-kong
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: supabase-vector
+      ports:
+        - port: 4000
+  egress:
+    - ports:
+        - port: 5432 # Postgres
+        - port: 53   # DNS
+          protocol: UDP

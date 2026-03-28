@@ -1,0 +1,27 @@
+# Vector - Log aggregator
+# Receives logs from all pods
+# Sends to Analytics only
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: vector-network-policy
+  namespace: supabase
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: supabase-vector
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - {} # Receives logs from all pods
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: supabase-analytics
+      ports:
+        - port: 4000
+    - ports:
+        - port: 53 # DNS
+          protocol: UDP

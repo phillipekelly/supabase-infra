@@ -1,0 +1,233 @@
+# -------------------------------------------------------
+# HPA CONFIGURATION
+# -------------------------------------------------------
+hpa:
+  rest:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+  auth:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+  storage:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 3
+    targetCPUUtilizationPercentage: 80
+    targetMemoryUtilizationPercentage: 90
+  functions:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 3
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+  imgproxy:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 3
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+
+# -------------------------------------------------------
+# SUPABASE CHART VALUES (nested under supabase:)
+# -------------------------------------------------------
+supabase:
+  secret:
+    dashboard:
+      secretRef: supabase-esm-secrets
+      secretRefKey:
+        username: dashboard-username
+        password: dashboard-password
+        openAiApiKey: openAiApiKey
+    db:
+      secretRef: supabase-esm-secrets
+      secretRefKey:
+        password: db-password
+        database: db-database
+    jwt:
+      secretRef: supabase-esm-secrets
+      secretRefKey:
+        anonKey: jwt-anonKey
+        serviceKey: jwt-serviceKey
+        secret: jwt-secret
+    analytics:
+      secretRef: supabase-esm-secrets
+      secretRefKey:
+        publicAccessToken: analytics-publicAccessToken
+        privateAccessToken: analytics-privateAccessToken
+    realtime:
+      secretRef: supabase-esm-secrets
+      secretRefKey:
+        secretKeyBase: realtime-secretKeyBase
+    meta:
+      secretRef: supabase-esm-secrets
+      secretRefKey:
+        cryptoKey: meta-cryptoKey
+
+  deployment:
+    db:
+      enabled: false
+    rest:
+      resources:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+    auth:
+      resources:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+    realtime:
+      resources:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+    storage:
+      resources:
+        requests:
+          cpu: 200m
+          memory: 256Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+    kong:
+      resources:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+    meta:
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          cpu: 200m
+          memory: 256Mi
+    analytics:
+      resources:
+        requests:
+          cpu: 100m
+          memory: 512Mi
+        limits:
+          cpu: 500m
+          memory: 1Gi
+    studio:
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          cpu: 200m
+          memory: 256Mi
+    functions:
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          cpu: 200m
+          memory: 256Mi
+    imgproxy:
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          cpu: 200m
+          memory: 256Mi
+    vector:
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          cpu: 200m
+          memory: 256Mi
+
+  environment:
+    auth:
+      DB_HOST: "192.168.49.1"
+      DB_PORT: "5432"
+      DB_DRIVER: postgres
+      DB_SSL: disable
+      API_EXTERNAL_URL: http://supabase.local
+      GOTRUE_API_HOST: "0.0.0.0"
+      GOTRUE_API_PORT: "9999"
+      GOTRUE_SITE_URL: http://supabase.local
+      GOTRUE_URI_ALLOW_LIST: "*"
+      GOTRUE_DISABLE_SIGNUP: "false"
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_JWT_ADMIN_ROLES: service_role
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_EXP: "3600"
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
+      GOTRUE_MAILER_AUTOCONFIRM: "true"
+    rest:
+      DB_HOST: "192.168.49.1"
+      DB_PORT: "5432"
+      DB_DRIVER: postgres
+      DB_SSL: disable
+      PGRST_DB_SCHEMAS: public,storage,graphql_public
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_DB_USE_LEGACY_GUCS: "false"
+      PGRST_APP_SETTINGS_JWT_EXP: "3600"
+    realtime:
+      DB_HOST: "192.168.49.1"
+      DB_PORT: "5432"
+      DB_USER: supabase_admin
+      DB_SSL: "false"
+      PORT: "4000"
+      FLY_ALLOC_ID: fly123
+      FLY_APP_NAME: realtime
+      ENABLE_TAILSCALE: "false"
+      DB_AFTER_CONNECT_QUERY: "SET search_path TO _realtime"
+      DB_ENC_KEY: supabaserealtime
+      ERL_AFLAGS: -proto_dist inet_tcp
+      DNS_NODES: "''"
+      RLIMIT_NOFILE: "10000"
+      APP_NAME: realtime
+      SEED_SELF_HOST: "true"
+    meta:
+      DB_HOST: "192.168.49.1"
+      DB_PORT: "5432"
+      DB_DRIVER: postgres
+      DB_SSL: disable
+    storage:
+      DB_HOST: "192.168.49.1"
+      DB_PORT: "5432"
+      DB_DRIVER: postgres
+      DB_SSL: disable
+    analytics:
+      DB_HOST: "192.168.49.1"
+      DB_PORT: "5432"
+    studio:
+      POSTGRES_HOST: "192.168.49.1"
+      DEFAULT_ORGANIZATION_NAME: "Default Organization"
+# -------------------------------------------------------
+# INGRESS CONFIGURATION
+# -------------------------------------------------------
+ingress:
+  enabled: true
+  className: nginx
+  host: studio.local
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+

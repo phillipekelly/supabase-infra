@@ -1,0 +1,31 @@
+# Storage
+# Receives from Kong and Imgproxy
+# Sends to Postgres and S3 (AWS)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: storage-network-policy
+  namespace: supabase
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: supabase-storage
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: supabase-kong
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: supabase-imgproxy
+      ports:
+        - port: 5000
+  egress:
+    - ports:
+        - port: 5432  # Postgres
+        - port: 443   # S3 on AWS
+        - port: 53    # DNS
+          protocol: UDP

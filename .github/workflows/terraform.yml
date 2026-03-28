@@ -1,0 +1,291 @@
+# ==============================================================================
+# Terraform CI/CD Pipeline
+#
+# Supports multiple environments: dev, sit, prod
+# Triggers:
+#   - Pull Request → validates and plans for affected environment
+#   - Push to main → applies to prod
+#   - Push to develop → applies to dev
+#   - Push to sit → applies to sit
+# ==============================================================================
+
+name: Terraform
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - sit
+    paths:
+      - 'terraform/**'
+      - '.github/workflows/terraform.yml'
+  pull_request:
+    branches:
+      - main
+      - develop
+      - sit
+    paths:
+      - 'terraform/**'
+      - '.github/workflows/terraform.yml'
+
+concurrency:
+  group: terraform-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+env:
+  TF_VERSION: "1.9.0"
+  AWS_REGION: "us-east-1"
+
+jobs:
+  # ----------------------------------------------------------------------------
+  # Set environment based on branch
+  # ----------------------------------------------------------------------------
+  set-env:
+    name: Set Environment
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.set-env.outputs.environment }}
+      working_dir: ${{ steps.set-env.outputs.working_dir }}
+    steps:
+      - name: Determine environment
+        id: set-env
+        run: |
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]] || [[ "${{ github.base_ref }}" == "main" ]]; then
+            echo "environment=prod" >> $GITHUB_OUTPUT
+            echo "working_dir=terraform/environments/prod" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.ref }}" == "refs/heads/sit" ]] || [[ "${{ github.base_ref }}" == "sit" ]]; then
+            echo "environment=sit" >> $GITHUB_OUTPUT
+            echo "working_dir=terraform/environments/sit" >> $GITHUB_OUTPUT
+          else
+            echo "environment=dev" >> $GITHUB_OUTPUT
+            echo "working_dir=terraform/environments/dev" >> $GITHUB_OUTPUT
+          fi
+
+  # ----------------------------------------------------------------------------
+  # Validate
+  # ----------------------------------------------------------------------------
+  validate:
+    name: Validate (${{ needs.set-env.outputs.environment }})
+    runs-on: ubuntu-latest
+    needs: set-env
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-Validate-${{ needs.set-env.outputs.environment }}
+
+      - name: Terraform Format Check
+        id: fmt
+        working-directory: ${{ needs.set-env.outputs.working_dir }}
+        run: terraform fmt -check -recursive
+        continue-on-error: true
+
+      - name: Terraform Init
+        id: init
+        working-directory: ${{ needs.set-env.outputs.working_dir }}
+        run: terraform init -input=false
+
+      - name: Terraform Validate
+        id: validate
+        working-directory: ${{ needs.set-env.outputs.working_dir }}
+        run: terraform validate -no-color
+
+      - name: Post validation results to PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const output = `## Terraform Validation — ${{ needs.set-env.outputs.environment }}
+            | Check | Status |
+            |-------|--------|
+            | Format | ${{ steps.fmt.outcome == 'success' && '✅ Passed' || '❌ Failed' }} |
+            | Init | ${{ steps.init.outcome == 'success' && '✅ Passed' || '❌ Failed' }} |
+            | Validate | ${{ steps.validate.outcome == 'success' && '✅ Passed' || '❌ Failed' }} |
+            *Triggered by @${{ github.actor }}*`;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            })
+
+  # ----------------------------------------------------------------------------
+  # Plan
+  # ----------------------------------------------------------------------------
+  plan:
+    name: Plan (${{ needs.set-env.outputs.environment }})
+    runs-on: ubuntu-latest
+    needs: [validate, set-env]
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-Plan-${{ needs.set-env.outputs.environment }}
+
+      - name: Terraform Init
+        working-directory: ${{ needs.set-env.outputs.working_dir }}
+        run: terraform init -input=false
+
+      - name: Terraform Plan
+        id: plan
+        working-directory: ${{ needs.set-env.outputs.working_dir }}
+        run: |
+          terraform plan \
+            -var-file="terraform.tfvars.ci" \
+            -no-color \
+            -out=tfplan \
+            2>&1 | tee plan_output.txt
+        env:
+          TF_VAR_db_master_password: ${{ secrets.TF_VAR_DB_MASTER_PASSWORD }}
+          TF_VAR_jwt_secret: ${{ secrets.TF_VAR_JWT_SECRET }}
+          TF_VAR_jwt_anon_key: ${{ secrets.TF_VAR_JWT_ANON_KEY }}
+          TF_VAR_jwt_service_key: ${{ secrets.TF_VAR_JWT_SERVICE_KEY }}
+          TF_VAR_dashboard_username: ${{ secrets.TF_VAR_DASHBOARD_USERNAME }}
+          TF_VAR_dashboard_password: ${{ secrets.TF_VAR_DASHBOARD_PASSWORD }}
+          TF_VAR_analytics_public_token: ${{ secrets.TF_VAR_ANALYTICS_PUBLIC_TOKEN }}
+          TF_VAR_analytics_private_token: ${{ secrets.TF_VAR_ANALYTICS_PRIVATE_TOKEN }}
+          TF_VAR_realtime_secret_key_base: ${{ secrets.TF_VAR_REALTIME_SECRET_KEY_BASE }}
+          TF_VAR_meta_crypto_key: ${{ secrets.TF_VAR_META_CRYPTO_KEY }}
+        continue-on-error: true
+
+      - name: Post plan to PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const planOutput = fs.readFileSync(
+              '${{ github.workspace }}/${{ needs.set-env.outputs.working_dir }}/plan_output.txt',
+              'utf8'
+            );
+            const maxLength = 65000;
+            const truncated = planOutput.length > maxLength
+              ? planOutput.substring(0, maxLength) + '\n\n... [truncated, see Actions logs]'
+              : planOutput;
+            const output = `## Terraform Plan — ${{ needs.set-env.outputs.environment }}
+            **Status:** ${{ steps.plan.outcome == 'success' && '✅ Plan succeeded' || '❌ Plan failed' }}
+            <details>
+            <summary>Click to expand plan output</summary>
+
+            \`\`\`hcl
+            ${truncated}
+            \`\`\`
+            </details>
+            *Triggered by @${{ github.actor }} — merge to apply*`;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            })
+
+      - name: Upload plan artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-${{ needs.set-env.outputs.environment }}-${{ github.event.pull_request.number }}
+          path: ${{ needs.set-env.outputs.working_dir }}/tfplan
+          retention-days: 5
+
+  # ----------------------------------------------------------------------------
+  # Apply
+  # ----------------------------------------------------------------------------
+  apply:
+    name: Apply (${{ needs.set-env.outputs.environment }})
+    runs-on: ubuntu-latest
+    needs: [validate, set-env]
+    if: github.event_name == 'push'
+    environment: ${{ needs.set-env.outputs.environment }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-Apply-${{ needs.set-env.outputs.environment }}
+
+      - name: Terraform Init
+        working-directory: ${{ needs.set-env.outputs.working_dir }}
+        run: terraform init -input=false
+
+      - name: Terraform Plan
+        working-directory: ${{ needs.set-env.outputs.working_dir }}
+        run: |
+          terraform plan \
+            -var-file="terraform.tfvars.ci" \
+            -no-color \
+            -out=tfplan
+        env:
+          TF_VAR_db_master_password: ${{ secrets.TF_VAR_DB_MASTER_PASSWORD }}
+          TF_VAR_jwt_secret: ${{ secrets.TF_VAR_JWT_SECRET }}
+          TF_VAR_jwt_anon_key: ${{ secrets.TF_VAR_JWT_ANON_KEY }}
+          TF_VAR_jwt_service_key: ${{ secrets.TF_VAR_JWT_SERVICE_KEY }}
+          TF_VAR_dashboard_username: ${{ secrets.TF_VAR_DASHBOARD_USERNAME }}
+          TF_VAR_dashboard_password: ${{ secrets.TF_VAR_DASHBOARD_PASSWORD }}
+          TF_VAR_analytics_public_token: ${{ secrets.TF_VAR_ANALYTICS_PUBLIC_TOKEN }}
+          TF_VAR_analytics_private_token: ${{ secrets.TF_VAR_ANALYTICS_PRIVATE_TOKEN }}
+          TF_VAR_realtime_secret_key_base: ${{ secrets.TF_VAR_REALTIME_SECRET_KEY_BASE }}
+          TF_VAR_meta_crypto_key: ${{ secrets.TF_VAR_META_CRYPTO_KEY }}
+
+      - name: Terraform Apply
+        working-directory: ${{ needs.set-env.outputs.working_dir }}
+        run: terraform apply -auto-approve tfplan
+        env:
+          TF_VAR_db_master_password: ${{ secrets.TF_VAR_DB_MASTER_PASSWORD }}
+          TF_VAR_jwt_secret: ${{ secrets.TF_VAR_JWT_SECRET }}
+          TF_VAR_jwt_anon_key: ${{ secrets.TF_VAR_JWT_ANON_KEY }}
+          TF_VAR_jwt_service_key: ${{ secrets.TF_VAR_JWT_SERVICE_KEY }}
+          TF_VAR_dashboard_username: ${{ secrets.TF_VAR_DASHBOARD_USERNAME }}
+          TF_VAR_dashboard_password: ${{ secrets.TF_VAR_DASHBOARD_PASSWORD }}
+          TF_VAR_analytics_public_token: ${{ secrets.TF_VAR_ANALYTICS_PUBLIC_TOKEN }}
+          TF_VAR_analytics_private_token: ${{ secrets.TF_VAR_ANALYTICS_PRIVATE_TOKEN }}
+          TF_VAR_realtime_secret_key_base: ${{ secrets.TF_VAR_REALTIME_SECRET_KEY_BASE }}
+          TF_VAR_meta_crypto_key: ${{ secrets.TF_VAR_META_CRYPTO_KEY }}
+
+      - name: Post apply summary
+        if: always()
+        run: |
+          echo "## Terraform Apply — ${{ needs.set-env.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Status | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | ${{ needs.set-env.outputs.environment }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Actor | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Commit | ${{ github.sha }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Time | $(date -u) |" >> $GITHUB_STEP_SUMMARY

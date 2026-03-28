@@ -1,0 +1,61 @@
+# ==============================================================================
+# Helm Lint Pipeline
+# Validates Helm chart on every PR that touches helm/ directory
+# ==============================================================================
+
+name: Helm Lint
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'helm/**'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'helm/**'
+
+jobs:
+  lint:
+    name: Lint Helm Chart
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: "3.16.0"
+
+      - name: Update Helm dependencies
+        run: helm dependency update helm/supabase-stack
+
+      - name: Lint Helm chart
+        run: |
+          helm lint helm/supabase-stack \
+            --values helm/supabase-stack/values.yaml \
+            --strict
+
+      - name: Template render test
+        run: |
+          helm template supabase helm/supabase-stack \
+            --values helm/supabase-stack/values.yaml \
+            --debug > /dev/null
+
+      - name: Post lint results to PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## Helm Lint Results\n\n✅ Chart lint passed\n✅ Template render successful\n\n*Triggered by @${{ github.actor }}*`
+            })

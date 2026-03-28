@@ -1,0 +1,33 @@
+# ==============================================================================
+# SIT (System Integration Testing) Environment Variables
+# Closer to production but still cost optimized
+# ==============================================================================
+
+aws_region  = "us-east-1"
+environment = "sit"
+project     = "supabase"
+
+vpc_cidr             = "10.2.0.0/16"
+availability_zones   = ["us-east-1a", "us-east-1b"]
+private_subnet_cidrs = ["10.2.1.0/24", "10.2.2.0/24"]
+public_subnet_cidrs  = ["10.2.101.0/24", "10.2.102.0/24"]
+
+# Medium instances
+eks_cluster_name       = "supabase-eks-sit"
+eks_cluster_version    = "1.31"
+eks_node_instance_type = "t3.medium"
+eks_node_min_size      = 2
+eks_node_max_size      = 4
+eks_node_desired_size  = 2
+
+# Mid-range DB for SIT
+db_name                  = "postgres"
+db_master_username       = "supabase_admin"
+db_instance_class        = "db.r6g.large"
+db_backup_retention_days = 7
+
+storage_bucket_name = "supabase-storage-sit"
+
+supabase_namespace = "supabase"
+supabase_domain    = "sit-supabase.yourdomain.com"
+studio_domain      = "sit-studio.yourdomain.com"

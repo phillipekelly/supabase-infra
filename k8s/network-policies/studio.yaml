@@ -1,0 +1,24 @@
+# Studio - Admin UI
+# Receives from internet via ingress
+# Sends to Kong and Meta only
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: studio-network-policy
+  namespace: supabase
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: supabase-studio
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - {} # Allow from ingress controller
+  egress:
+    - ports:
+        - port: 8000 # Kong
+        - port: 8080 # Meta
+    - ports:
+        - port: 53   # DNS
+          protocol: UDP
