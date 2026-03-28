@@ -33,6 +33,6 @@ helm/supabase-stack/Chart.lock
 .vscode/
 
 # ==============================================================================
-# Task description — assessors already have this
+# Task description
 # ==============================================================================
 Instructions.txt
