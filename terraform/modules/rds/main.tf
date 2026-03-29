@@ -84,7 +84,7 @@ resource "aws_rds_cluster" "main" {
 
   # Engine
   engine         = "aurora-postgresql"
-  engine_version = "15.4"
+  engine_version = "15.8"
   port           = local.port
 
   # Database
