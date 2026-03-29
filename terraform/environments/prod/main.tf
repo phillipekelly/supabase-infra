@@ -115,3 +115,16 @@ module "supabase" {
   studio_domain       = var.studio_domain
   tags                = local.common_tags
 }
+
+# ------------------------------------------------------------------------------
+# Observability — CloudWatch log groups + future Prometheus/Grafana/Fluent Bit
+# ------------------------------------------------------------------------------
+module "observability" {
+  source = "../../modules/observability"
+
+  cluster_name       = var.eks_cluster_name
+  environment        = var.environment
+  aws_region         = var.aws_region
+  log_retention_days = 30
+  tags               = local.common_tags
+}

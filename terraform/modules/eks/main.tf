@@ -913,17 +913,3 @@ resource "helm_release" "alb_controller" {
     aws_eks_node_group.main
   ]
 }
-
-# ------------------------------------------------------------------------------
-# CloudWatch Log Group for EKS Control Plane
-# Explicit retention policy to prevent indefinite log accumulation
-# Without this, logs accumulate forever at $0.50/GB/month
-# ------------------------------------------------------------------------------
-resource "aws_cloudwatch_log_group" "eks" {
-  name              = "/aws/eks/${var.cluster_name}/cluster"
-  retention_in_days = 30
-
-  tags = merge(var.tags, {
-    Name = "/aws/eks/${var.cluster_name}/cluster"
-  })
-}
