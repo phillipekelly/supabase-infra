@@ -22,45 +22,8 @@ A fully automated, production-grade deployment of [Supabase](https://supabase.co
 
 ## Architecture Overview
 
-```
-                          ┌─────────────────────────────────────────────────────┐
-                          │                    AWS Account                       │
-                          │                                                       │
-                          │  ┌──────────────────────────────────────────────┐   │
-                          │  │                 VPC (10.0.0.0/16)             │   │
-                          │  │                                                │   │
-                          │  │  ┌─────────────┐      ┌─────────────┐        │   │
-                          │  │  │ Public AZ-A │      │ Public AZ-B │        │   │
-                          │  │  │ 10.0.101/24 │      │ 10.0.102/24 │        │   │
-                          │  │  │  NAT GW     │      │  NAT GW     │        │   │
-                          │  │  └──────┬──────┘      └──────┬──────┘        │   │
-                          │  │         │                     │               │   │
-                          │  │  ┌──────▼──────┐      ┌──────▼──────┐        │   │
-                          │  │  │Private AZ-A │      │Private AZ-B │        │   │
-                          │  │  │ 10.0.1.0/24 │      │ 10.0.2.0/24 │        │   │
-                          │  │  │             │      │             │        │   │
-                          │  │  │  EKS Nodes  │      │  EKS Nodes  │        │   │
-                          │  │  │  ┌────────┐ │      │ ┌────────┐  │        │   │
-                          │  │  │  │Supabase│ │      │ │Supabase│  │        │   │
-                          │  │  │  │  Pods  │ │      │ │  Pods  │  │        │   │
-                          │  │  │  └────────┘ │      │ └────────┘  │        │   │
-                          │  │  │             │      │             │        │   │
-                          │  │  │  Aurora     │      │  Aurora     │        │   │
-                          │  │  │  Primary    │      │  Replica    │        │   │
-                          │  │  └─────────────┘      └─────────────┘        │   │
-                          │  └──────────────────────────────────────────────┘   │
-                          │                                                       │
-                          │  ┌──────────┐  ┌──────────┐  ┌──────────────────┐  │
-                          │  │    S3    │  │ Secrets  │  │   CloudWatch     │  │
-                          │  │ Storage  │  │ Manager  │  │     Logs         │  │
-                          │  └──────────┘  └──────────┘  └──────────────────┘  │
-                          └─────────────────────────────────────────────────────┘
+![Supabase on AWS EKS — Architecture](docs/images/architecture.png)
 
-Internet → ALB (public) → Kong (API Gateway) → Supabase Services
-                       → Studio (Dashboard)
-
-GitHub Actions → OIDC → AWS IAM Role → Terraform → All Resources
-```
 
 ### Component Interactions
 
