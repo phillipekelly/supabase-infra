@@ -137,7 +137,7 @@ resource "aws_rds_cluster_instance" "primary" {
 
   availability_zone      = var.availability_zones[0]
   db_subnet_group_name   = aws_db_subnet_group.main.name
-  publicly_accessible    = false
+  publicly_accessible    = true
 
   # Performance Insights for query monitoring
   performance_insights_enabled = true
@@ -161,7 +161,7 @@ resource "aws_rds_cluster_instance" "replica" {
 
   availability_zone      = var.availability_zones[1]
   db_subnet_group_name   = aws_db_subnet_group.main.name
-  publicly_accessible    = false
+  publicly_accessible    = true
 
   # Performance Insights for query monitoring
   performance_insights_enabled = true
