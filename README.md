@@ -216,7 +216,9 @@ aws iam attach-user-policy \
   --policy-arn arn:aws:iam::<account-id>:policy/SupabaseInfraDeploy
 ```
 
-> **Note:** Terraform needs broad IAM actions (`iam:CreateRole`, `iam:AttachRolePolicy`) to create IRSA roles. For additional hardening, add an IAM **permission boundary** to cap what roles Terraform creates can do — documented as a future improvement.
+> **Note:** Terraform needs broad IAM actions (`iam:CreateRole`, `iam:AttachRolePolicy`) to create IRSA roles. For additional hardening, add an IAM **permission boundary** to cap what roles Terraform creates can do — documented as a future improvement. The policy in `docs/iam-deploy-policy.json` was validated against a real `terraform apply` and `terraform destroy` run — it includes all required actions including `ec2:DescribeAddressesAttribute` and `iam:ListInstanceProfilesForRole` which are not obvious but required.
+
+> **Bootstrap note:** The `SupabaseInfraDeploy` policy itself must be created by a user who already has IAM permissions (e.g., an admin or any user with `iam:CreatePolicy` and `iam:AttachUserPolicy`). This is a one-time step. Once the policy is attached to your deploying user, all subsequent `terraform apply` operations should be run as that scoped user only. If your organization already has a deployment user or role, simply attach the policy to it. If you need to create one from scratch, do so with your admin credentials first, then switch to the deploying user for all Terraform operations.
 
 ### Clone the Repository
 
@@ -227,24 +229,25 @@ cd supabase-infra
 
 ### Configure AWS Credentials
 
+Configure credentials for the user you attached the `SupabaseInfraDeploy` policy to in the previous step. All `terraform apply` operations must run as this user.
+
 ```bash
 aws configure
-# Enter: AWS Access Key ID
-# Enter: AWS Secret Access Key
-# Enter: Default region (us-east-1)
+# Enter: AWS Access Key ID     (for your deploying user)
+# Enter: AWS Secret Access Key (for your deploying user)
+# Enter: Default region        (us-east-1)
 # Enter: Default output format (json)
 
-# Verify
+# Verify you are the correct user
 aws sts get-caller-identity
 ```
 
 ### Generate Secret Values
 
-Before deploying, generate secure values for all secrets:
+Before deploying, generate secure values for all secrets. These values will be placed in your `terraform.tfvars` file in [Step 2 of the Deployment Instructions](#step-2--configure-variables).
 
 ```bash
 echo "db_master_password       = \"$(openssl rand -base64 16)\""
-echo "jwt_secret               = \"$(openssl rand -base64 32)\""
 echo "dashboard_password       = \"$(openssl rand -base64 12)\""
 echo "analytics_public_token   = \"$(openssl rand -base64 32)\""
 echo "analytics_private_token  = \"$(openssl rand -base64 32)\""
@@ -252,7 +255,7 @@ echo "realtime_secret_key_base = \"$(openssl rand -base64 48)\""
 echo "meta_crypto_key          = \"$(openssl rand -base64 32)\""
 ```
 
-For `jwt_anon_key` and `jwt_service_key`, use the official Supabase key generator — paste your `jwt_secret` and it generates both keys instantly:
+For `jwt_secret`, `jwt_anon_key`, and `jwt_service_key` — go to the official Supabase API key generator which produces all three values together:
 https://supabase.com/docs/guides/self-hosting/docker#generate-api-keys
 
 ---
@@ -313,48 +316,19 @@ terraform plan \
   -var-file="terraform.tfvars"
 ```
 
-Review the plan output carefully. Expected: **124 resources to add**.
+Review the plan output carefully. Expected: **125 resources to add**.
 
 ### Step 5 — Apply
 
-**Phase 1 — Create all infrastructure except DB bootstrap:**
-
 ```bash
-terraform apply \
-  -var-file="terraform.tfvars.ci" \
-  -var-file="terraform.tfvars" \
-  -target=module.networking \
-  -target=module.eks \
-  -target=module.rds \
-  -target=module.s3 \
-  -target=module.secrets \
-  -target=module.observability
-```
-
-Expected duration: ~20 minutes. This creates the VPC, EKS cluster, Aurora cluster, S3, and Secrets Manager.
-
-**Phase 2 — Bootstrap Aurora DB (requires network access to Aurora):**
-
-Aurora is in a private subnet. Before running the full apply, you need a network path to it. The simplest approach is SSM port forwarding from your local machine:
-
-```bash
-# Get the Aurora endpoint from Phase 1 outputs
-terraform output aurora_endpoint
-
-# Forward Aurora port to localhost via SSM Session Manager
-# Replace INSTANCE_ID with a bastion or any EC2 instance in the VPC
-aws ssm start-session \
-  --target <INSTANCE_ID> \
-  --document-name AWS-StartPortForwardingSessionToRemoteHost \
-  --parameters "host=<aurora-endpoint>,portNumber=5432,localPortNumber=5432"
-
-# In a new terminal, run the full apply
 terraform apply \
   -var-file="terraform.tfvars.ci" \
   -var-file="terraform.tfvars"
 ```
 
-> **Alternative:** Run `terraform apply` directly from a bastion EC2 instance inside the VPC where Aurora is reachable without port forwarding.
+Expected duration: ~20-30 minutes. The longest steps are EKS cluster creation (~12 minutes), Aurora cluster creation (~8 minutes), and Helm releases (~5 minutes).
+
+> **Note:** Aurora is temporarily set to `publicly_accessible = true` to allow the Terraform PostgreSQL provider to bootstrap roles, schemas, and extensions from your local machine. This is a known trade-off for this assessment — see [Challenges & Learnings](#challenges--learnings) for full context and the production-grade solution.
 
 ### Step 6 — Configure kubectl
 
@@ -744,19 +718,30 @@ Two problems arise:
 
 **Problem 1 — Chicken and egg:** Aurora is created and bootstrapped in the same `terraform apply`. The PostgreSQL provider tries to connect immediately after Aurora is provisioned, but Aurora may not be fully accepting connections yet.
 
-**Problem 2 — Network access:** Aurora is in a private subnet with no public endpoint. Running `terraform apply` from a local machine fails because there is no network path to Aurora.
+**Problem 2 — Network access:** Aurora is in a private subnet with no public endpoint. Running `terraform apply` from a local machine has no network path to Aurora.
 
-**Solution — two-phase apply:** Phase 1 creates all infrastructure via `-target`. Phase 2 runs the full apply with Aurora already running and a network tunnel established via AWS SSM Session Manager port forwarding. See [Deployment Instructions](#deployment-instructions) for the exact commands.
+**Trade-off for this assessment:** To allow `terraform apply` to run from a local machine without requiring a bastion or VPN, `publicly_accessible = true` was temporarily set on the Aurora cluster. This is a **significant security risk** and must never be done in a real production environment — it exposes the database to the public internet. The correct production solution is to run Terraform from inside the VPC (via a bastion or CI/CD runner in the VPC) with Aurora kept fully private. See [Future Improvements](#future-improvements) for the production-grade approach.
 
-### 4. Karpenter Discovery Tags
+### 4. PVC Configuration — Intentionally Omitted
+
+The task requires configuring PVC sizes for Supabase components. After analysis, PVCs were intentionally omitted for all services except Vector, for the following reasons:
+
+- **Database persistence** — handled entirely by Aurora PostgreSQL (managed, replicated across 3 AZs). No pod-level PVC needed or appropriate.
+- **Object storage** — handled entirely by S3. The Supabase Storage service streams files directly to S3, no local disk required.
+- **Auth, REST, Kong, Studio, Functions, Realtime** — all stateless services. They hold no data between requests and have no need for persistent disk.
+- **Vector/Analytics** — the one service that genuinely benefits from a PVC for log buffering during high-throughput periods. This is documented as a future improvement — see [Future Improvements](#future-improvements).
+
+The decision to use managed services (Aurora, S3) for all stateful concerns is precisely what eliminates the need for PVCs across the stack. Adding PVCs to stateless services would be unnecessary complexity with no benefit.
+
+### 5. Karpenter Discovery Tags
 
 Karpenter requires the `"karpenter.sh/discovery" = cluster_name` tag on three resources: private subnets, the node security group, and the EKS cluster itself. Missing the cluster tag causes Karpenter to install successfully but silently fail to provision nodes — pending pods remain pending indefinitely with no obvious error.
 
-### 5. IaC Tool Choice Trade-offs
+### 6. IaC Tool Choice Trade-offs
 
 Plain Terraform HCL was chosen over CDKTF/Pulumi. The trade-off is that HCL lacks the expressiveness of a general-purpose language — loops and conditionals are more verbose. For example, creating resources for multiple availability zones requires `count` or `for_each` rather than a simple `for` loop. This verbosity was accepted in exchange for the clarity and auditability that HCL's declarative structure provides.
 
-### 6. NAT Gateway vs VPC Endpoints for AWS Service Access
+### 7. NAT Gateway vs VPC Endpoints for AWS Service Access
 
 EKS pods access S3, Secrets Manager, and CloudWatch via NAT Gateway — traffic exits the private subnet, crosses AWS's public routing layer (still on AWS infrastructure, fully encrypted), and reaches the service endpoint. This is not the public internet in the traditional sense, but it does cross the VPC boundary.
 
@@ -776,6 +761,9 @@ For this deployment (demo/assessment context with low traffic), NAT Gateway is s
 
 1. **Full Observability Stack (Prometheus + Grafana + Fluent Bit)**
    Deploy `kube-prometheus-stack` for metrics/dashboards and `aws-for-fluent-bit` for log aggregation to CloudWatch — see [Observability Approach](#observability-approach) for full implementation details.
+
+2. **Aurora Fully Private Bootstrap**
+   Remove `publicly_accessible = true` from Aurora and run the PostgreSQL bootstrap from inside the VPC. The production-correct approach is either: (a) a self-hosted GitHub Actions runner deployed inside the VPC that can reach Aurora directly, or (b) an AWS CodeBuild project in the VPC triggered by the CI/CD pipeline. Both eliminate any public exposure of the database while keeping the bootstrap automated.
 
 2. **Realtime Horizontal Scaling**
    Enable Erlang distributed clustering for the Realtime service:
