@@ -1,4 +1,8 @@
-# Deny all ingress and egress by default
+# ==============================================================================
+# USED DIRECTLY BY TERRAFORM
+# terraform/modules/supabase/main.tf reads these files via file() function
+# Changes here are applied on next terraform apply
+# ==============================================================================
 # All pods must explicitly allow traffic
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

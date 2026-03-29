@@ -1,3 +1,11 @@
+# ==============================================================================
+# LOCAL DEVELOPMENT DEFAULTS ONLY
+# These values are used solely to satisfy helm lint syntax validation.
+# In AWS, all values are overridden by:
+#   terraform/modules/supabase/values-aws.yaml.tpl
+# Do not use this file for AWS deployments.
+# ==============================================================================
+
 # -------------------------------------------------------
 # HPA CONFIGURATION
 # -------------------------------------------------------

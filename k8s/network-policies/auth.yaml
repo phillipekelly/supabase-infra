@@ -1,4 +1,8 @@
-# Auth (GoTrue)
+# ==============================================================================
+# USED DIRECTLY BY TERRAFORM
+# terraform/modules/supabase/main.tf reads these files via file() function
+# Changes here are applied on next terraform apply
+# ==============================================================================
 # Receives from Kong only
 # Sends to Postgres only
 apiVersion: networking.k8s.io/v1

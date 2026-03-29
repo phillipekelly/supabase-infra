@@ -1,4 +1,8 @@
-# Storage
+# ==============================================================================
+# USED DIRECTLY BY TERRAFORM
+# terraform/modules/supabase/main.tf reads these files via file() function
+# Changes here are applied on next terraform apply
+# ==============================================================================
 # Receives from Kong and Imgproxy
 # Sends to Postgres and S3 (AWS)
 apiVersion: networking.k8s.io/v1
