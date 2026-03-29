@@ -16,7 +16,6 @@ jwt_anon_key    = "your-jwt-anon-key"
 jwt_service_key = "your-jwt-service-key"
 
 # Studio Dashboard
-dashboard_username = "supabase"
 dashboard_password = "your-secure-dashboard-password"
 
 # Analytics (Logflare)
