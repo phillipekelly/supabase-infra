@@ -191,15 +191,14 @@ ESO was chosen over Kubernetes Secrets (plain), Vault, or the AWS Secrets Manage
 
 **Both are not needed simultaneously.** The `ingress.className` value switches between them per environment. This is intentional design — same Ingress manifest, different controller backend.
 
-### CI/CD — GitHub Actions (not Jenkins)
+### CI/CD — GitHub Actions
 
-GitHub Actions was chosen over Jenkins because:
-- **Zero infrastructure** — no Jenkins server to provision, maintain, or pay for
-- **Native OIDC with AWS** — GitHub Actions assumes an IAM role via OpenID Connect, no stored `AWS_ACCESS_KEY_ID` or `AWS_SECRET_ACCESS_KEY` anywhere
-- **Co-located with code** — workflow files live in the same repo, versioned alongside infrastructure
-- **Industry standard** — the most widely adopted CI/CD tool for infrastructure teams using Terraform today
+GitHub Actions is the right choice for this deployment for four reasons:
 
-Jenkins would require an EC2 instance (~$20-30/month), plugin management, credential storage, and separate access management. For this deployment, GitHub Actions provides all required functionality with less complexity and lower cost.
+- **Zero infrastructure** — no CI/CD server to provision, maintain, patch, or pay for. Workflows are fully managed by GitHub.
+- **Native OIDC with AWS** — GitHub Actions assumes an IAM role via OpenID Connect. No `AWS_ACCESS_KEY_ID` or `AWS_SECRET_ACCESS_KEY` is stored anywhere — temporary credentials are issued per-run and expire automatically.
+- **Co-located with code** — workflow files live in the same repo, versioned alongside infrastructure. Every change to the pipeline is a PR, reviewed like any other code change.
+- **Industry standard** — the most widely adopted CI/CD tool for infrastructure teams using Terraform today, with first-class support from HashiCorp (`hashicorp/setup-terraform`) and AWS (`aws-actions/configure-aws-credentials`).
 
 ---
 
@@ -255,7 +254,7 @@ echo "realtime_secret_key_base = \"$(openssl rand -base64 48)\""
 echo "meta_crypto_key          = \"$(openssl rand -base64 32)\""
 ```
 
-For `jwt_anon_key` and `jwt_service_key`, generate them at:
+For `jwt_anon_key` and `jwt_service_key`, use the official Supabase key generator — paste your `jwt_secret` and it generates both keys instantly:
 https://supabase.com/docs/guides/self-hosting/docker#generate-api-keys
 
 ---
@@ -804,6 +803,9 @@ Plain Terraform HCL was chosen over CDKTF/Pulumi. The trade-off is that HCL lack
 
 12. **WAF Integration**
     Attach an AWS WAF Web ACL to the ALB for DDoS protection and OWASP rule sets.
+
+13. **Bootstrap Secret Auto-Generation**
+    Extend the bootstrap script to auto-generate all secrets including JWT keys using the `jsonwebtoken` Node.js library, eliminating the need for external tools and making the initial setup fully self-contained.
 
 ---
 
