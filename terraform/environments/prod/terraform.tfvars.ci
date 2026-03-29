@@ -23,7 +23,7 @@ eks_node_desired_size  = 2
 db_name                  = "postgres"
 db_master_username       = "supabase_admin"
 db_instance_class        = "db.r6g.large"
-db_backup_retention_days = 7
+db_backup_retention_days = 1
 
 storage_bucket_name = "supabase-storage"
 
