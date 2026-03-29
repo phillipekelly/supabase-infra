@@ -765,16 +765,20 @@ Plain Terraform HCL was chosen over CDKTF/Pulumi. The trade-off is that HCL lack
 4. **Multi-Region HA via Aurora Global Database**
    For true regional failover, promote the Aurora cluster to a Global Database with a secondary region. Combined with Route53 health-check-based failover, this achieves RPO < 1 second and RTO < 1 minute.
 
-5. **Prometheus + Grafana Monitoring**
+5. **VPC Endpoints for S3, Secrets Manager, and CloudWatch**
+   Currently pods access AWS managed services via NAT Gateway — traffic exits the private subnet, traverses the NAT, and reaches the AWS service endpoint over the internet. Adding VPC Interface/Gateway Endpoints keeps all traffic inside the AWS network, eliminating NAT Gateway data processing costs (~$0.045/GB) for these services and removing internet exposure entirely.
+   
+
+6. **Prometheus + Grafana Monitoring**
    Deploy `kube-prometheus-stack` with pre-built dashboards for EKS, Aurora, and Supabase service metrics.
 
-6. **Fluent Bit Log Aggregation**
+7. **Fluent Bit Log Aggregation**
    Deploy `aws-for-fluent-bit` as a DaemonSet to ship pod logs to CloudWatch Log Groups with per-service log groups and metric filters.
 
-7. **Vector PVC for Log Buffering**
+8. **Vector PVC for Log Buffering**
    The Vector log aggregator (used by Supabase Analytics) benefits from a PVC for buffering logs during high-throughput periods. A 10Gi `gp3` EBS volume prevents log loss during analytics service restarts.
 
-8. **Spot Instance Optimization for Dev/SIT**
+9. **Spot Instance Optimization for Dev/SIT**
    Configure Karpenter NodePool to prefer Spot instances in dev and sit environments:
    ```yaml
    requirements:
@@ -785,26 +789,26 @@ Plain Terraform HCL was chosen over CDKTF/Pulumi. The trade-off is that HCL lack
 
 ### Low Priority
 
-9. **Aurora Parameter Group Customization**
+10. **Aurora Parameter Group Customization**
    Create a custom Aurora parameter group with tuned settings:
    - `log_min_duration_statement = 1000` (log slow queries > 1s)
    - `shared_preload_libraries = pg_stat_statements,pgvector`
    - `max_connections = 200` (sized for PgBouncer pooling)
 
-10. **S3 HTTPS-Only Bucket Policy**
+11. **S3 HTTPS-Only Bucket Policy**
     Enforce HTTPS-only access to the storage bucket:
     ```hcl
     Condition = { Bool = { "aws:SecureTransport" = "false" } }
     Effect = "Deny"
     ```
 
-11. **Aurora Global Database for Multi-Region**
+12. **Aurora Global Database for Multi-Region**
     See point 4 above.
 
-12. **WAF Integration**
+13. **WAF Integration**
     Attach an AWS WAF Web ACL to the ALB for DDoS protection and OWASP rule sets.
 
-13. **Bootstrap Secret Auto-Generation**
+14. **Bootstrap Secret Auto-Generation**
     Extend the bootstrap script to auto-generate all secrets including JWT keys using the `jsonwebtoken` Node.js library, eliminating the need for external tools and making the initial setup fully self-contained.
 
 ---
