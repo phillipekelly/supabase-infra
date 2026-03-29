@@ -22,8 +22,45 @@ A fully automated, production-grade deployment of [Supabase](https://supabase.co
 
 ## Architecture Overview
 
-![Supabase on AWS EKS — Architecture](docs/images/architecture.png)
+```
+                          ┌─────────────────────────────────────────────────────┐
+                          │                    AWS Account                       │
+                          │                                                       │
+                          │  ┌──────────────────────────────────────────────┐   │
+                          │  │                 VPC (10.0.0.0/16)             │   │
+                          │  │                                                │   │
+                          │  │  ┌─────────────┐      ┌─────────────┐        │   │
+                          │  │  │ Public AZ-A │      │ Public AZ-B │        │   │
+                          │  │  │ 10.0.101/24 │      │ 10.0.102/24 │        │   │
+                          │  │  │  NAT GW     │      │  NAT GW     │        │   │
+                          │  │  └──────┬──────┘      └──────┬──────┘        │   │
+                          │  │         │                     │               │   │
+                          │  │  ┌──────▼──────┐      ┌──────▼──────┐        │   │
+                          │  │  │Private AZ-A │      │Private AZ-B │        │   │
+                          │  │  │ 10.0.1.0/24 │      │ 10.0.2.0/24 │        │   │
+                          │  │  │             │      │             │        │   │
+                          │  │  │  EKS Nodes  │      │  EKS Nodes  │        │   │
+                          │  │  │  ┌────────┐ │      │ ┌────────┐  │        │   │
+                          │  │  │  │Supabase│ │      │ │Supabase│  │        │   │
+                          │  │  │  │  Pods  │ │      │ │  Pods  │  │        │   │
+                          │  │  │  └────────┘ │      │ └────────┘  │        │   │
+                          │  │  │             │      │             │        │   │
+                          │  │  │  Aurora     │      │  Aurora     │        │   │
+                          │  │  │  Primary    │      │  Replica    │        │   │
+                          │  │  └─────────────┘      └─────────────┘        │   │
+                          │  └──────────────────────────────────────────────┘   │
+                          │                                                       │
+                          │  ┌──────────┐  ┌──────────┐  ┌──────────────────┐  │
+                          │  │    S3    │  │ Secrets  │  │   CloudWatch     │  │
+                          │  │ Storage  │  │ Manager  │  │     Logs         │  │
+                          │  └──────────┘  └──────────┘  └──────────────────┘  │
+                          └─────────────────────────────────────────────────────┘
 
+Internet → ALB (public) → Kong (API Gateway) → Supabase Services
+                       → Studio (Dashboard)
+
+GitHub Actions → OIDC → AWS IAM Role → Terraform → All Resources
+```
 
 ### Component Interactions
 
@@ -142,17 +179,16 @@ ESO was chosen over Kubernetes Secrets (plain), Vault, or the AWS Secrets Manage
 - **Automatic rotation** — ESO polls Secrets Manager every hour and updates the Kubernetes Secret automatically
 - **Separation of concerns** — infrastructure team manages secrets in AWS Console, application team references them by name
 
-### Ingress — AWS ALB Ingress Controller (not NGINX in production)
+### Ingress — AWS ALB Ingress Controller
 
-**Local development (Minikube):** NGINX Ingress Controller is used because Minikube doesn't have ALB support. NGINX runs as a pod inside the cluster and routes traffic locally.
+The AWS ALB Ingress Controller is installed on EKS via Helm during `terraform apply`. When a Kubernetes `Ingress` resource with `className: alb` is created, the controller automatically provisions an AWS Application Load Balancer:
 
-**Production (EKS):** AWS ALB Ingress Controller is used. When a Kubernetes Ingress resource with `className: alb` is created, the controller automatically provisions an AWS Application Load Balancer. This is superior to running NGINX in production because:
-- ALB is a managed service — no NGINX pods to maintain, scale, or patch
-- ALB integrates natively with AWS Certificate Manager for SSL termination
-- ALB integrates with AWS WAF for DDoS protection
-- ALB health checks are handled at the AWS layer, not the pod layer
+- ALB is a fully managed AWS service — no ingress pods to maintain, scale, or patch
+- Integrates natively with AWS Certificate Manager for SSL termination
+- Integrates with AWS WAF for DDoS protection
+- Health checks handled at the AWS layer
 
-**Both are not needed simultaneously.** The `ingress.className` value switches between them per environment. This is intentional design — same Ingress manifest, different controller backend.
+> **Note on `helm/supabase-stack/values.yaml`:** This file contains `className: nginx` as a default — these are local development defaults used during initial Minikube testing and are not applied in AWS. The AWS deployment uses `terraform/modules/supabase/values-aws.yaml.tpl` which sets `className: alb` and overrides all local defaults.
 
 ### CI/CD — GitHub Actions
 
@@ -169,19 +205,56 @@ GitHub Actions is the right choice for this deployment for four reasons:
 
 ### Required Tools
 
+> **OS:** Linux or macOS required. Windows users should use [WSL2](https://docs.microsoft.com/en-us/windows/wsl/install).
+
+**For deployment (`terraform apply`):**
+
 | Tool | Version | Installation |
 |------|---------|-------------|
 | Terraform | >= 1.9.0 | https://developer.hashicorp.com/terraform/install |
 | AWS CLI | >= 2.0 | https://aws.amazon.com/cli/ |
-| kubectl | >= 1.28 | https://kubernetes.io/docs/tasks/tools/ |
-| Helm | >= 3.16 | https://helm.sh/docs/intro/install/ |
-| psql | >= 15 | `sudo apt-get install postgresql-client` |
 | git | any | https://git-scm.com/ |
+| psql | >= 15 | `sudo apt-get install postgresql-client` |
+
+> `psql` is required because the Terraform PostgreSQL provider connects directly to Aurora during `terraform apply` to bootstrap roles, schemas, and extensions. Aurora is in a private subnet — see [Phase 2 of the deployment instructions](#step-5--apply) for how to establish the required network path via AWS SSM port forwarding.
+
+**For verification and smoke testing only:**
+
+| Tool | Version | Installation |
+|------|---------|-------------|
+| kubectl | >= 1.28 | https://kubernetes.io/docs/tasks/tools/ |
+| helm | >= 3.16 | https://helm.sh/docs/intro/install/ |
 
 ### Required AWS Permissions
 
-The AWS user/role running the initial `terraform apply` needs the following permissions:
-- `AdministratorAccess` (for initial bootstrap) or a scoped policy covering EC2, EKS, RDS, S3, IAM, SecretsManager, KMS
+Following the same least-privilege principle applied throughout this infrastructure, the deploying user/role should **never use `AdministratorAccess`**. A scoped IAM policy covering only what Terraform actually needs is provided at `docs/iam-deploy-policy.json`.
+
+| Service | Actions granted |
+|---------|----------------|
+| EC2/VPC | VPC, subnets, IGW, NAT, EIP, route tables, security groups, EC2 instance management (Karpenter) |
+| EKS | Cluster, node groups, addons, OIDC provider |
+| IAM | Roles, policies, attachments, OIDC providers |
+| RDS | Aurora cluster, instances, subnet groups, snapshots |
+| S3 | Bucket and all bucket configurations |
+| Secrets Manager | Secrets and versions |
+| KMS | Keys, aliases, encryption operations |
+| CloudWatch Logs | Log groups and retention policies |
+| SSM | Parameter reads for EKS AMI lookups |
+| ELB | Load balancer describes (for ALB controller) |
+
+Create and attach the policy before running `terraform apply`:
+
+```bash
+aws iam create-policy \
+  --policy-name SupabaseInfraDeploy \
+  --policy-document file://docs/iam-deploy-policy.json
+
+aws iam attach-user-policy \
+  --user-name <your-iam-user> \
+  --policy-arn arn:aws:iam::<account-id>:policy/SupabaseInfraDeploy
+```
+
+> **Note:** Terraform needs broad IAM actions (`iam:CreateRole`, `iam:AttachRolePolicy`) to create IRSA roles. For additional hardening, add an IAM **permission boundary** to cap what roles Terraform creates can do — documented as a future improvement.
 
 ### Clone the Repository
 
@@ -282,16 +355,44 @@ Review the plan output carefully. Expected: **124 resources to add**.
 
 ### Step 5 — Apply
 
+**Phase 1 — Create all infrastructure except DB bootstrap:**
+
 ```bash
+terraform apply \
+  -var-file="terraform.tfvars.ci" \
+  -var-file="terraform.tfvars" \
+  -target=module.networking \
+  -target=module.eks \
+  -target=module.rds \
+  -target=module.s3 \
+  -target=module.secrets \
+  -target=module.observability
+```
+
+Expected duration: ~20 minutes. This creates the VPC, EKS cluster, Aurora cluster, S3, and Secrets Manager.
+
+**Phase 2 — Bootstrap Aurora DB (requires network access to Aurora):**
+
+Aurora is in a private subnet. Before running the full apply, you need a network path to it. The simplest approach is SSM port forwarding from your local machine:
+
+```bash
+# Get the Aurora endpoint from Phase 1 outputs
+terraform output aurora_endpoint
+
+# Forward Aurora port to localhost via SSM Session Manager
+# Replace INSTANCE_ID with a bastion or any EC2 instance in the VPC
+aws ssm start-session \
+  --target <INSTANCE_ID> \
+  --document-name AWS-StartPortForwardingSessionToRemoteHost \
+  --parameters "host=<aurora-endpoint>,portNumber=5432,localPortNumber=5432"
+
+# In a new terminal, run the full apply
 terraform apply \
   -var-file="terraform.tfvars.ci" \
   -var-file="terraform.tfvars"
 ```
 
-Expected duration: **20-30 minutes**. The longest steps are:
-- EKS cluster creation: ~12 minutes
-- Aurora cluster creation: ~8 minutes
-- Helm releases: ~5 minutes
+> **Alternative:** Run `terraform apply` directly from a bastion EC2 instance inside the VPC where Aurora is reachable without port forwarding.
 
 ### Step 6 — Configure kubectl
 
@@ -673,11 +774,17 @@ Supabase Realtime is a Phoenix/Elixir WebSocket server. Each client maintains a 
 
 The correct solution is enabling Erlang distributed clustering via `DNS_NODES` environment variable, which allows multiple Realtime pods to form a distributed cluster and share connection state. This is documented as a future improvement.
 
-### 3. Aurora PostgreSQL Bootstrap — Chicken and Egg Problem
+### 3. Aurora PostgreSQL Bootstrap — Network Access and Chicken-and-Egg
 
-Supabase requires specific PostgreSQL roles, schemas, and extensions to exist before the application pods can start. Standard Aurora has no built-in mechanism to run initialization SQL on creation.
+Supabase requires specific PostgreSQL roles, schemas, and extensions before application pods can start. The `cyrilgdn/postgresql` Terraform provider handles this automatically during `terraform apply` — but it requires a live network connection to the Aurora endpoint.
 
-**Solution:** The `cyrilgdn/postgresql` Terraform provider runs the bootstrap SQL (role creation, schema creation, extension installation, grant assignments) directly from Terraform during the `terraform apply` run. This requires network access to the Aurora endpoint — meaning Terraform must be run from within the VPC or via a VPN/bastion. This is documented as a prerequisite.
+Two problems arise:
+
+**Problem 1 — Chicken and egg:** Aurora is created and bootstrapped in the same `terraform apply`. The PostgreSQL provider tries to connect immediately after Aurora is provisioned, but Aurora may not be fully accepting connections yet.
+
+**Problem 2 — Network access:** Aurora is in a private subnet with no public endpoint. Running `terraform apply` from a local machine fails because there is no network path to Aurora.
+
+**Solution — two-phase apply:** Phase 1 creates all infrastructure via `-target`. Phase 2 runs the full apply with Aurora already running and a network tunnel established via AWS SSM Session Manager port forwarding. See [Deployment Instructions](#deployment-instructions) for the exact commands.
 
 ### 4. Karpenter Discovery Tags
 
@@ -687,13 +794,28 @@ Karpenter requires the `"karpenter.sh/discovery" = cluster_name` tag on three re
 
 Plain Terraform HCL was chosen over CDKTF/Pulumi. The trade-off is that HCL lacks the expressiveness of a general-purpose language — loops and conditionals are more verbose. For example, creating resources for multiple availability zones requires `count` or `for_each` rather than a simple `for` loop. This verbosity was accepted in exchange for the clarity and auditability that HCL's declarative structure provides.
 
+### 6. NAT Gateway vs VPC Endpoints for AWS Service Access
+
+EKS pods access S3, Secrets Manager, and CloudWatch via NAT Gateway — traffic exits the private subnet, crosses AWS's public routing layer (still on AWS infrastructure, fully encrypted), and reaches the service endpoint. This is not the public internet in the traditional sense, but it does cross the VPC boundary.
+
+The alternative is VPC Endpoints — private tunnels from the VPC directly into each AWS service, with no NAT involved. However VPC Endpoints have a cost consideration:
+
+- **S3 Gateway endpoint** — free, strictly better, should always be added
+- **Secrets Manager Interface endpoint** — ~$14/month (2 AZs)
+- **CloudWatch Interface endpoint** — ~$14/month (2 AZs)
+
+For this deployment (demo/assessment context with low traffic), NAT Gateway is simpler and the endpoint fees would likely exceed the NAT data processing savings. For a high-traffic production deployment with heavy S3 usage or frequent secret rotations, VPC endpoints become cost-effective and reduce the security surface. This is a traffic-dependent decision — see [Future Improvements](#future-improvements).
+
 ---
 
 ## Future Improvements
 
 ### High Priority
 
-1. **Realtime Horizontal Scaling**
+1. **Full Observability Stack (Prometheus + Grafana + Fluent Bit)**
+   Deploy `kube-prometheus-stack` for metrics/dashboards and `aws-for-fluent-bit` for log aggregation to CloudWatch — see [Observability Approach](#observability-approach) for full implementation details.
+
+2. **Realtime Horizontal Scaling**
    Enable Erlang distributed clustering for the Realtime service:
    ```yaml
    environment:
@@ -702,7 +824,7 @@ Plain Terraform HCL was chosen over CDKTF/Pulumi. The trade-off is that HCL lack
    ```
    This allows multiple Realtime pods to share WebSocket connection state.
 
-2. **HTTPS / TLS Termination**
+3. **HTTPS / TLS Termination**
    Add AWS Certificate Manager (ACM) certificate and Route53 hosted zone:
    ```hcl
    resource "aws_acm_certificate" "supabase" {
@@ -712,7 +834,7 @@ Plain Terraform HCL was chosen over CDKTF/Pulumi. The trade-off is that HCL lack
    ```
    Then annotate the Ingress with `alb.ingress.kubernetes.io/certificate-arn`.
 
-3. **Route53 DNS**
+4. **Route53 DNS**
    Automate DNS record creation pointing your domain to the ALB:
    ```hcl
    resource "aws_route53_record" "supabase" {
@@ -729,19 +851,12 @@ Plain Terraform HCL was chosen over CDKTF/Pulumi. The trade-off is that HCL lack
    For true regional failover, promote the Aurora cluster to a Global Database with a secondary region. Combined with Route53 health-check-based failover, this achieves RPO < 1 second and RTO < 1 minute.
 
 5. **VPC Endpoints for S3, Secrets Manager, and CloudWatch**
-   Currently pods access AWS managed services via NAT Gateway — traffic exits the private subnet, traverses the NAT, and reaches the AWS service endpoint over the internet. Adding VPC Interface/Gateway Endpoints keeps all traffic inside the AWS network, eliminating NAT Gateway data processing costs (~$0.045/GB) for these services and removing internet exposure entirely.
-   
+   Currently pods access AWS managed services via NAT Gateway. Whether this is worth changing depends entirely on traffic volume — S3 Gateway endpoints are free and always worth adding, but Secrets Manager and CloudWatch interface endpoints cost ~$14/month each per AZ. For low-traffic deployments NAT is actually cheaper. See [Challenges & Learnings](#challenges--learnings) for a full cost breakdown of the trade-off.
 
-6. **Prometheus + Grafana Monitoring**
-   Deploy `kube-prometheus-stack` with pre-built dashboards for EKS, Aurora, and Supabase service metrics.
-
-7. **Fluent Bit Log Aggregation**
-   Deploy `aws-for-fluent-bit` as a DaemonSet to ship pod logs to CloudWatch Log Groups with per-service log groups and metric filters.
-
-8. **Vector PVC for Log Buffering**
+6. **Vector PVC for Log Buffering**
    The Vector log aggregator (used by Supabase Analytics) benefits from a PVC for buffering logs during high-throughput periods. A 10Gi `gp3` EBS volume prevents log loss during analytics service restarts.
 
-9. **Spot Instance Optimization for Dev/SIT**
+7. **Spot Instance Optimization for Dev/SIT**
    Configure Karpenter NodePool to prefer Spot instances in dev and sit environments:
    ```yaml
    requirements:
@@ -752,27 +867,30 @@ Plain Terraform HCL was chosen over CDKTF/Pulumi. The trade-off is that HCL lack
 
 ### Low Priority
 
-10. **Aurora Parameter Group Customization**
+8. **Aurora Parameter Group Customization**
    Create a custom Aurora parameter group with tuned settings:
    - `log_min_duration_statement = 1000` (log slow queries > 1s)
    - `shared_preload_libraries = pg_stat_statements,pgvector`
    - `max_connections = 200` (sized for PgBouncer pooling)
 
-11. **S3 HTTPS-Only Bucket Policy**
+9. **S3 HTTPS-Only Bucket Policy**
     Enforce HTTPS-only access to the storage bucket:
     ```hcl
     Condition = { Bool = { "aws:SecureTransport" = "false" } }
     Effect = "Deny"
     ```
 
-12. **Aurora Global Database for Multi-Region**
+10. **Aurora Global Database for Multi-Region**
     See point 4 above.
 
-13. **WAF Integration**
+11. **WAF Integration**
     Attach an AWS WAF Web ACL to the ALB for DDoS protection and OWASP rule sets.
 
-14. **Bootstrap Secret Auto-Generation**
+12. **Bootstrap Secret Auto-Generation**
     Extend the bootstrap script to auto-generate all secrets including JWT keys using the `jsonwebtoken` Node.js library, eliminating the need for external tools and making the initial setup fully self-contained.
+
+13. **IAM Permission Boundary**
+    Add a permission boundary to all IAM roles created by Terraform. This caps what any role created during deployment can do, even if the deploying user has broad IAM permissions. Prevents privilege escalation — a compromised IRSA role cannot create a new role with more permissions than the boundary allows.
 
 ---
 
@@ -827,11 +945,12 @@ supabase-infra/
 │       ├── terraform.yml      # Multi-env CI/CD: plan on PR, apply on merge
 │       └── helm-lint.yml      # Helm chart validation
 ├── docs/
-│   └── aurora-bootstrap-reference.md  # Aurora DB initialization reference
+│   ├── aurora-bootstrap-reference.md  # Aurora DB initialization reference
+│   └── iam-deploy-policy.json         # Least-privilege IAM policy for deploying user
 ├── helm/
 │   └── supabase-stack/        # Wrapper Helm chart
 │       ├── Chart.yaml         # Depends on supabase/supabase v0.5.2
-│       ├── values.yaml        # Local/dev values (NGINX ingress)
+│       ├── values.yaml        # Default values (local dev only — overridden by values-aws.yaml.tpl in AWS)
 │       └── templates/
 │           ├── hpa-*.yaml     # HPAs for rest, auth, storage, functions, imgproxy
 │           └── ingress.yaml   # Ingress resource
@@ -844,8 +963,17 @@ supabase-infra/
 │   ├── teardown.sh            # Environment teardown script
 │   ├── environments/
 │   │   ├── dev/               # Development: t3.small, 1 node, 1-day backup
+│   │   │   ├── terraform.tfvars.ci       # Non-sensitive config (committed)
+│   │   │   ├── terraform.tfvars.example  # Secret placeholders (committed)
+│   │   │   └── backend.tf                # S3 state key: environments/dev/
 │   │   ├── sit/               # SIT: t3.medium, 2 nodes, 7-day backup
+│   │   │   ├── terraform.tfvars.ci       # Non-sensitive config (committed)
+│   │   │   ├── terraform.tfvars.example  # Secret placeholders (committed)
+│   │   │   └── backend.tf                # S3 state key: environments/sit/
 │   │   └── prod/              # Production: t3.medium, 2-6 nodes, 7-day backup
+│   │       ├── terraform.tfvars.ci       # Non-sensitive config (committed)
+│   │       ├── terraform.tfvars.example  # Secret placeholders (committed)
+│   │       └── backend.tf                # S3 state key: environments/prod/
 │   └── modules/
 │       ├── eks/               # EKS cluster, Karpenter, ALB controller, IRSA
 │       ├── networking/        # VPC, subnets, NAT gateways, route tables
