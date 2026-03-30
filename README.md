@@ -61,7 +61,7 @@ An IaC-driven, production-oriented deployment of [Supabase](https://supabase.com
 
 **CI/CD Flow:**
 
-![CI/CD Pipeline — GitHub Actions to AWS](docs/images/cicd-flow.png)
+![CI/CD Pipeline — GitHub Actions to AWS](docs/images/cicd-flow.svg)
 
 - Developer pushes code or opens a Pull Request on GitHub
 - On PR: GitHub Actions runs validate + plan, posts plan output as a PR comment
