@@ -1,3 +1,6 @@
+# Be aware this is an old approach that was replaced by running a k8 job to bootstrap the aws managed db, this document serves only as a reference as to what the Supabase application expects to be provisioned on an empty postgres setup!
+
+
 # Aurora PostgreSQL Bootstrap Reference
 
 This document describes the database initialization that Terraform performs automatically via the `cyrilgdn/postgresql` provider during `terraform apply`.

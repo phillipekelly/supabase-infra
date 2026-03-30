@@ -59,6 +59,18 @@ A fully automated, production-oriented deployment of [Supabase](https://supabase
 - After load drops, HPA scales pods down
 - Karpenter consolidates and terminates empty nodes
 
+**CI/CD Flow:**
+
+![CI/CD Pipeline — GitHub Actions to AWS](docs/images/cicd-flow.png)
+
+- Developer pushes code or opens a Pull Request on GitHub
+- On PR: GitHub Actions runs validate + plan, posts plan output as a PR comment
+- On push to `main`: GitHub Actions applies to the `prod` environment
+- On push to `sit` or `develop`: GitHub Actions applies to `sit` or `dev`
+- GitHub Actions assumes an IAM role via OIDC — no static AWS credentials stored anywhere
+- Terraform reads state from S3, plans and applies infrastructure changes
+- EKS and Aurora are updated in-place; Helm releases are upgraded if values changed
+
 ---
 
 ## Technology Choices Justification
@@ -521,16 +533,14 @@ This resolves within 30 seconds — just retry the curl.
 ### 7. Smoke Test — Studio UI
 
 ```bash
-# Open Studio in browser (HTTP only — see note above)
-# The browser must also send the correct Host header — use a /etc/hosts entry or a real domain
-echo "http://$ALB_URL"
+# Verify Studio pod is responding (HTTP 200)
+curl -s -o /dev/null -w "%{http_code}" \
+  http://$ALB_URL \
+  -H "Host: dev-studio.yourdomain.com"
+# Expected: 200
 ```
 
-For local testing without a real domain, add an entry to `/etc/hosts`:
-```
-<ALB_IP> dev-studio.yourdomain.com
-```
-Then open `http://dev-studio.yourdomain.com` in your browser.
+> Full Studio UI access in a browser requires a real domain pointed at the ALB via Route53 — covered in [Future Improvements](#future-improvements) items 3 and 4.
 
 ### 8. View Logs
 
@@ -591,30 +601,50 @@ cd terraform
 ```
 
 The teardown script handles the correct order of operations:
-1. Deletes ALB Ingress resources (must be done before VPC deletion)
-2. Uninstalls Helm releases (Supabase, ALB controller, Karpenter, ESO)
-3. Drains Karpenter-provisioned nodes
-4. Empties S3 bucket (required before bucket deletion)
-5. Disables Aurora deletion protection
-6. Runs `terraform destroy`
+1. Configures kubectl for the target environment
+2. Deletes ALB Ingress resources (must be done before VPC deletion)
+3. Uninstalls Supabase, ESO, and ALB controller Helm releases
+4. Drains and deletes Karpenter-provisioned nodes
+5. Uninstalls Karpenter
+6. Empties S3 bucket (required before bucket deletion)
+7. Disables Aurora deletion protection via AWS CLI
+8. Runs `terraform destroy`
 
 Expected duration: **20-30 minutes**.
 
 ### Manual Teardown
 
-If the script fails at any step:
+If the script fails at any step, run these commands in order:
 
 ```bash
 # Step 1 — Delete ingress (removes the ALB)
-kubectl delete ingress --all -n supabase
-sleep 30  # Wait for ALB to be deleted
+kubectl delete ingress --all -n supabase 2>/dev/null || true
+sleep 30
 
-# Step 2 — Empty S3 bucket
+# Step 2 — Uninstall Helm releases
+helm uninstall supabase -n supabase 2>/dev/null || true
+helm uninstall external-secrets -n external-secrets 2>/dev/null || true
+helm uninstall aws-load-balancer-controller -n kube-system 2>/dev/null || true
+
+# Step 3 — Drain Karpenter nodes then uninstall Karpenter
+kubectl delete nodeclaims --all 2>/dev/null || true
+sleep 90
+helm uninstall karpenter -n karpenter 2>/dev/null || true
+
+# Step 4 — Empty S3 bucket
+cd terraform/environments/dev   # or sit, prod
 BUCKET=$(terraform output -raw storage_bucket_name)
 aws s3 rm s3://$BUCKET --recursive
 
-# Step 3 — Terraform destroy
-cd terraform/environments/prod
+# Step 5 — Disable Aurora deletion protection
+aws rds modify-db-cluster \
+  --db-cluster-identifier supabase-dev-aurora \
+  --no-deletion-protection \
+  --apply-immediately \
+  --region us-east-1
+sleep 30
+
+# Step 6 — Terraform destroy
 terraform destroy \
   -var-file="terraform.tfvars.ci" \
   -var-file="terraform.tfvars"
@@ -729,6 +759,8 @@ The Terraform code follows module best practices:
 - **Outputs:** Each module exposes outputs consumed by other modules (e.g., `module.networking.vpc_id` → `module.eks.vpc_id`)
 - **Locals:** Computed values (name prefixes, tags) centralized in `locals.tf` per environment
 - **Versions:** All provider versions pinned in `versions.tf` for reproducible builds
+
+> A more DRY alternative using a shared stack module to eliminate per-environment duplication is documented in [Future Improvements](#future-improvements) item 15.
 
 ---
 
@@ -864,37 +896,7 @@ aws rds modify-db-cluster \
 
 This is intentional — deletion protection is a critical production safeguard and should not be removed from code. The friction it causes during development is the correct trade-off.
 
-### 8. EKS Managed Node Groups — Cluster Security Group vs Node Security Group
-
-When using EKS managed node groups, there are two distinct security groups in play and they are not interchangeable:
-
-**The Terraform-managed node security group** (`supabase-development-eks-nodes-*`) is created explicitly in the `eks` module and is used for Karpenter discovery tags, inter-node communication rules, and control plane access. It appears in Terraform state and has a predictable name.
-
-**The EKS-managed cluster security group** (`eks-cluster-sg-<cluster-name>-*`) is created automatically by AWS when the EKS cluster is provisioned. AWS attaches this SG to every node in the managed node group — it is the security group that actually governs all pod-level outbound traffic, including connections from pods to Aurora.
-
-The initial implementation passed `module.eks.node_security_group_id` to the RDS security group ingress rule — a reasonable assumption since we created that SG for nodes. However pods running on those nodes use the EKS cluster SG for outbound traffic, not the Terraform node SG.
-
-This creates a second problem: Karpenter-provisioned nodes only get the **node SG** (discovered via the `karpenter.sh/discovery` tag) — not the cluster SG. So the RDS security group must allow **both** security groups: the cluster SG for managed node group pods, and the node SG for Karpenter-provisioned node pods:
-
-```hcl
-ingress {
-  description     = "PostgreSQL from EKS nodes (cluster SG — managed node group)"
-  from_port       = local.port
-  to_port         = local.port
-  protocol        = "tcp"
-  security_groups = [var.eks_security_group_id]
-}
-
-ingress {
-  description     = "PostgreSQL from Karpenter-provisioned nodes (node SG)"
-  from_port       = local.port
-  to_port         = local.port
-  protocol        = "tcp"
-  security_groups = [var.node_security_group_id]
-}
-```
-
-### 9. Karpenter-Provisioned Nodes — Port 443 to EKS Control Plane
+### 8. Karpenter-Provisioned Nodes — Port 443 to EKS Control Plane
 
 Karpenter-provisioned nodes use the node security group (`supabase-eks-nodes-*`) discovered via the `karpenter.sh/discovery` tag. When a new node boots, its kubelet needs to call the EKS API server on port 443 to register itself with the cluster. The EKS cluster security group was not allowing inbound port 443 from the node SG, so new nodes booted successfully but never joined — sitting `NotReady` indefinitely with no obvious error.
 
@@ -912,7 +914,7 @@ resource "aws_security_group_rule" "cluster_ingress_karpenter_nodes" {
 }
 ```
 
-### 10. EKS `gp2` Storage Class Not Default
+### 9. EKS `gp2` Storage Class Not Default
 
 EKS provisions a `gp2` storage class but does not mark it as the default. Any PVC created without an explicit `storageClassName` stays `Pending` indefinitely. The scheduler error `pod has unbound immediate PersistentVolumeClaims` gives no indication that the root cause is a missing default storage class — it looks like a node capacity problem.
 
@@ -937,13 +939,13 @@ resource "kubectl_manifest" "gp2_default_storage_class" {
 }
 ```
 
-### 11. RWO PVCs Block HPA from Scaling Across Nodes
+### 10. RWO PVCs Block HPA from Scaling Across Nodes
 
 Supabase functions, imgproxy, and storage use `ReadWriteOnce` PVCs — volumes that can only be attached to one node at a time. Setting `minReplicas: 2` in the HPA causes the second pod to fail with `Multi-Attach error for volume: Volume is already exclusively attached to one node`. The pod stays in `ContainerCreating` indefinitely with no obvious link to the PVC constraint.
 
 The fix is `minReplicas: 1` for any service that mounts an RWO PVC. Auth and REST are stateless and can safely run at `minReplicas: 2`.
 
-### 12. Aurora `supabase_storage_admin` Needs Explicit Database Grants
+### 11. Aurora `supabase_storage_admin` Needs Explicit Database Grants
 
 The storage service connects to Aurora as `supabase_storage_admin` and immediately fails with `permission denied for database postgres`. On standard PostgreSQL, roles created with `CREATEROLE` inherit broad access, but Aurora's restricted permission model requires explicit grants. The bootstrap Job must include:
 
@@ -1001,7 +1003,10 @@ GRANT ALL ON SCHEMA public TO supabase_storage_admin;
 6. **VPC Endpoints for S3, Secrets Manager, and CloudWatch**
    Currently pods access AWS managed services via NAT Gateway. Whether this is worth changing depends entirely on traffic volume — S3 Gateway endpoints are free and always worth adding, but Secrets Manager and CloudWatch interface endpoints cost ~$14/month each per AZ. For low-traffic deployments NAT is actually cheaper. See [Challenges & Learnings](#challenges--learnings) for a full cost breakdown of the trade-off.
 
-7. **Spot Instance Optimization for Dev/SIT**
+7. **Restrict EKS API Server Access**
+   Currently `public_access_cidrs = ["0.0.0.0/0"]` allows anyone on the internet to reach the EKS API server (though authentication is still required). In production this should be restricted to known CIDR ranges — either your office IP, a VPN endpoint, or GitHub Actions IP ranges. The cleanest solution is enabling private-only access (`endpoint_public_access = false`) and routing CI/CD through a VPC-connected runner or AWS CodeBuild, eliminating the public endpoint entirely. Trade-off: private-only access requires all kubectl operations to originate from within the VPC.
+
+8. **Spot Instance Optimization for Dev/SIT**
    Configure Karpenter NodePool to prefer Spot instances in dev and sit environments:
    ```yaml
    requirements:
@@ -1012,21 +1017,39 @@ GRANT ALL ON SCHEMA public TO supabase_storage_admin;
 
 ### Low Priority
 
-8. **S3 HTTPS-Only Bucket Policy**
-    Enforce HTTPS-only access to the storage bucket:
-    ```hcl
-    Condition = { Bool = { "aws:SecureTransport" = "false" } }
-    Effect = "Deny"
-    ```
+9. **S3 HTTPS-Only Bucket Policy**
+   Enforce HTTPS-only access to the storage bucket:
+   ```hcl
+   Condition = { Bool = { "aws:SecureTransport" = "false" } }
+   Effect = "Deny"
+   ```
 
-9. **WAF Integration**
+10. **WAF Integration**
     Attach an AWS WAF Web ACL to the ALB for DDoS protection and OWASP rule sets.
 
-10. **Bootstrap Secret Auto-Generation**
+11. **Liveness/Readiness Probes and Pod Disruption Budgets**
+    Adding liveness probes (restart stuck pods), readiness probes (remove unhealthy pods from load balancer rotation), and PodDisruptionBudgets (prevent all replicas being evicted simultaneously during node drain) would meaningfully improve reliability. For example, PostgREST exposes a `/ready` endpoint usable as a readiness probe. PDBs ensure at least one replica remains available during rolling updates or node drains.
+
+12. **Pod Anti-Affinity**
+    Currently two replicas of the same service can land on the same node. If that node fails, both replicas go down simultaneously, defeating the purpose of running two replicas. Adding `podAntiAffinity` rules to spread replicas across nodes and AZs ensures true HA at the pod scheduling level.
+
+13. **Bootstrap Secret Auto-Generation**
     Extend the bootstrap script to auto-generate all secrets including JWT keys using the `jsonwebtoken` Node.js library, eliminating the need for external tools and making the initial setup fully self-contained.
 
-11. **IAM Permission Boundary**
+14. **IAM Permission Boundary**
     Add a permission boundary to all IAM roles created by Terraform. This caps what any role created during deployment can do, even if the deploying user has broad IAM permissions. Prevents privilege escalation — a compromised IRSA role cannot create a new role with more permissions than the boundary allows.
+
+15. **Environment Refactoring — Stack Module Pattern (optional)**
+    `variables.tf`, `locals.tf`, `outputs.tf`, `data.tf`, and `main.tf` are near-identical across dev, sit, and prod — copy-paste drift between these files is the root cause of several historical bugs in this repo. The fix is to extract a `modules/stack/` module that wraps all six child modules, making each environment a thin wrapper with only `backend.tf`, `providers.tf`, `versions.tf`, and a short `main.tf` that calls `module "stack" { ... }`. All variable declarations, locals, and outputs live once in the stack module; `terraform.tfvars.ci` remains the only file that legitimately differs per environment.
+
+16. **Deeper AWS Service Integration — Replacing Remaining Supabase Components (optional)**
+    The current architecture replaces Supabase's stateful and sensitive components (PostgreSQL → Aurora, MinIO → S3, `.env` secrets → Secrets Manager). Three additional Supabase components could be replaced with AWS-native equivalents:
+
+    - **Supavisor (connection pooler) → RDS Proxy:** AWS RDS Proxy is a fully managed HA connection pooler that integrates natively with IAM and Secrets Manager, eliminating the Supavisor container entirely. Drawback: adds cost (~$0.015/vCPU-hour) and a connection hop.
+    - **Kong (API gateway) → AWS API Gateway:** Fully managed, scales to zero, integrates with Cognito and IAM. Drawback: replacing Kong requires rewriting Supabase's JWT authentication logic and breaks compatibility with the upstream Helm chart.
+    - **GoTrue (auth) → Amazon Cognito:** Managed auth with built-in OAuth, MFA, and user pools. Drawback: replacing GoTrue breaks Supabase's Row Level Security integration which depends on GoTrue JWTs — effectively no longer running Supabase.
+
+    RDS Proxy is the most practical replacement. Kong and GoTrue replacements would fundamentally change what "Supabase" means and are not recommended unless building a fully custom backend.
 
 ---
 
