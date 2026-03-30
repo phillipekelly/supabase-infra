@@ -107,7 +107,7 @@ resource "aws_rds_cluster" "main" {
   skip_final_snapshot          = false
   final_snapshot_identifier    = "${local.cluster_identifier}-final-snapshot"
 
-  storage_encrypted   = false
+  storage_encrypted   = true
   deletion_protection = true
   apply_immediately   = false
 

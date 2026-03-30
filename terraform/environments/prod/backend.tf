@@ -7,7 +7,7 @@
 terraform {
   backend "s3" {
     bucket       = "supabase-terraform-state-904667241500"
-    key          = "environments/aws/terraform.tfstate"
+    key          = "environments/prod/terraform.tfstate"
     region       = "us-east-1"
     encrypt      = true
     use_lockfile = true
