@@ -109,8 +109,8 @@ resource "aws_rds_cluster" "main" {
   final_snapshot_identifier = "${local.cluster_identifier}-final-snapshot"
 
   # Security
-  storage_encrypted = true
-  kms_key_id       = aws_kms_key.rds.arn
+  storage_encrypted = false
+  # kms_key_id       = aws_kms_key.rds.arn # disabled for assessment
   deletion_protection = true
 
   # Apply changes immediately in production
@@ -141,7 +141,7 @@ resource "aws_rds_cluster_instance" "primary" {
 
   # Performance Insights for query monitoring
   performance_insights_enabled = true
-  performance_insights_kms_key_id = aws_kms_key.rds.arn
+  # performance_insights_kms_key_id = aws_kms_key.rds.arn # disabled for assessment
   performance_insights_retention_period = 7
 
   tags = merge(var.tags, {
@@ -165,7 +165,7 @@ resource "aws_rds_cluster_instance" "replica" {
 
   # Performance Insights for query monitoring
   performance_insights_enabled = true
-  performance_insights_kms_key_id = aws_kms_key.rds.arn
+  # performance_insights_kms_key_id = aws_kms_key.rds.arn # disabled for assessment
   performance_insights_retention_period = 7
 
   tags = merge(var.tags, {

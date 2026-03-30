@@ -24,6 +24,10 @@ resource "aws_cloudwatch_log_group" "eks_control_plane" {
   tags = merge(var.tags, {
     Name = "/aws/eks/${var.cluster_name}/cluster"
   })
+
+  lifecycle {
+    ignore_changes = all
+  }
 }
 
 # ------------------------------------------------------------------------------
