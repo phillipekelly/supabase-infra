@@ -5,7 +5,7 @@
 # Triggers:
 #   - Pull Request → validates and plans for affected environment
 #   - Push to main → applies to prod
-#   - Push to develop → applies to dev
+#   - Push to dev → applies to dev
 #   - Push to sit → applies to sit
 # ==============================================================================
 
@@ -15,7 +15,7 @@ on:
   push:
     branches:
       - main
-      - develop
+      - dev
       - sit
     paths:
       - 'terraform/**'
@@ -23,7 +23,7 @@ on:
   pull_request:
     branches:
       - main
-      - develop
+      - dev
       - sit
     paths:
       - 'terraform/**'
