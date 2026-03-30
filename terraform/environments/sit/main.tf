@@ -84,7 +84,8 @@ module "rds" {
   name_prefix           = local.name_prefix
   vpc_id                = module.networking.vpc_id
   private_subnet_ids    = module.networking.private_subnet_ids
-  eks_security_group_id = module.eks.node_security_group_id
+  eks_security_group_id = module.eks.cluster_security_group_id
+  node_security_group_id = module.eks.node_security_group_id 
   availability_zones    = var.availability_zones
   db_name               = var.db_name
   db_master_username    = var.db_master_username
@@ -114,4 +115,5 @@ module "supabase" {
   supabase_domain     = var.supabase_domain
   studio_domain       = var.studio_domain
   tags                = local.common_tags
+  db_master_username  = var.db_master_username
 }

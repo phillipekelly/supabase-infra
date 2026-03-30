@@ -41,6 +41,7 @@ resource "aws_security_group" "cluster" {
   description = "Security group for EKS control plane"
   vpc_id      = var.vpc_id
 
+
   egress {
     description = "Allow all outbound"
     from_port   = 0
@@ -453,6 +454,19 @@ resource "aws_iam_policy" "karpenter" {
         Effect = "Allow"
         Action = "ssm:GetParameter"
         Resource = "arn:aws:ssm:*:*:parameter/aws/service/*"
+      },
+      {
+        Sid    = "AllowIAMInstanceProfile"
+        Effect = "Allow"
+        Action = [
+          "iam:GetInstanceProfile",
+          "iam:CreateInstanceProfile",
+          "iam:AddRoleToInstanceProfile",
+          "iam:RemoveRoleFromInstanceProfile",
+          "iam:DeleteInstanceProfile",
+          "iam:TagInstanceProfile"
+        ]
+        Resource = "*"
       }
     ]
   })
@@ -861,6 +875,12 @@ resource "aws_iam_policy" "alb_controller" {
           "elasticloadbalancing:ModifyRule"
         ]
         Resource = "*"
+      },
+      {
+        Sid    = "AllowDeleteUntaggedALBSecurityGroups"
+        Effect = "Allow"
+        Action = ["ec2:DeleteSecurityGroup"]
+        Resource = "*"
       }
     ]
   })
@@ -942,4 +962,58 @@ resource "helm_release" "alb_controller" {
   depends_on = [
     aws_eks_node_group.main
   ]
+}
+
+resource "aws_security_group_rule" "cluster_ingress_karpenter_nodes" {
+  type                     = "ingress"
+  description              = "Allow Karpenter-provisioned nodes to reach EKS API"
+  from_port                = 443
+  to_port                  = 443
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.cluster.id
+  source_security_group_id = aws_security_group.nodes.id
+}
+
+resource "aws_security_group_rule" "cluster_ingress_karpenter_dns_udp" {
+  type                     = "ingress"
+  description              = "Allow DNS UDP from Karpenter nodes"
+  from_port                = 53
+  to_port                  = 53
+  protocol                 = "udp"
+  security_group_id        = aws_security_group.cluster.id
+  source_security_group_id = aws_security_group.nodes.id
+}
+
+resource "aws_security_group_rule" "cluster_ingress_karpenter_dns_tcp" {
+  type                     = "ingress"
+  description              = "Allow DNS TCP from Karpenter nodes"
+  from_port                = 53
+  to_port                  = 53
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.cluster.id
+  source_security_group_id = aws_security_group.nodes.id
+}
+
+# ------------------------------------------------------------------------------
+# Default Storage Class
+# Sets gp2 as the default storage class so PVCs bind automatically
+# Without this, pods with PVCs stay Pending indefinitely
+# ------------------------------------------------------------------------------
+resource "kubectl_manifest" "gp2_default_storage_class" {
+  yaml_body = <<-YAML
+    apiVersion: storage.k8s.io/v1
+    kind: StorageClass
+    metadata:
+      name: gp2
+      annotations:
+        storageclass.kubernetes.io/is-default-class: "true"
+    provisioner: kubernetes.io/aws-ebs
+    reclaimPolicy: Delete
+    volumeBindingMode: WaitForFirstConsumer
+    allowVolumeExpansion: false
+  YAML
+
+  server_side_apply = true
+  force_conflicts   = true
+  depends_on        = [aws_eks_addon.ebs_csi]
 }

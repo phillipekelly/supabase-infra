@@ -129,8 +129,8 @@ variable "eks_node_min_size" {
   default     = 2
 
   validation {
-    condition     = var.eks_node_min_size >= 2
-    error_message = "Minimum node count must be at least 2 for high availability"
+    condition     = var.eks_node_min_size >= 1
+    error_message = "Minimum node count must be at least 1"
   }
 }
 

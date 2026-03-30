@@ -64,6 +64,7 @@ resource "aws_subnet" "private" {
     Name                              = "${var.name_prefix}-private-${var.availability_zones[count.index]}"
     "kubernetes.io/role/internal-elb" = "1" # Required for internal ALB
     "kubernetes.io/cluster/${var.name_prefix}-eks" = "shared" # Required for EKS
+    "karpenter.sh/discovery"          = "${var.name_prefix}-eks" # Required for Karpenter node provisioning
   })
 }
 

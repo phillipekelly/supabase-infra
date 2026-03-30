@@ -61,3 +61,8 @@ output "alb_controller_role_arn" {
   description = "ARN of the IRSA role for AWS Load Balancer Controller"
   value       = aws_iam_role.alb_controller.arn
 }
+
+output "cluster_security_group_id" {
+  description = "EKS cluster security group ID — attached to all nodes by EKS automatically"
+  value       = aws_eks_cluster.main.vpc_config[0].cluster_security_group_id
+}

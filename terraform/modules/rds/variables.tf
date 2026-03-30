@@ -58,3 +58,8 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "node_security_group_id" {
+  description = "EKS node security group ID — attached to Karpenter-provisioned nodes"
+  type        = string
+}

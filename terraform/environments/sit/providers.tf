@@ -64,7 +64,7 @@ provider "helm" {
 }
 
 # Kubectl provider for applying raw Kubernetes manifests
-# Used for network policies and ESO resources
+# Used for network policies, ESO resources, and Aurora bootstrap Job
 provider "kubectl" {
   host                   = module.eks.cluster_endpoint
   cluster_ca_certificate = base64decode(module.eks.cluster_ca_certificate)
@@ -82,25 +82,4 @@ provider "kubectl" {
       var.aws_region
     ]
   }
-}
-
-# PostgreSQL provider for Aurora DB bootstrap
-# Uses AWS RDS IAM auth - no password needed
-# Requires network connectivity to Aurora private endpoint
-# Run terraform from within VPC (bastion host or AWS Cloud9)
-provider "postgresql" {
-  scheme    = "awspostgres"
-  host      = module.rds.cluster_endpoint
-  port      = 5432
-  database  = "postgres"
-  username  = var.db_master_username
-  sslmode   = "require"
-  superuser = false
-
-  # Use AWS RDS IAM authentication
-  # No password needed - uses AWS credentials from environment
-  aws_rds_iam_auth   = true
-  aws_rds_iam_region = var.aws_region
-
-  expected_version = "15.4"
 }

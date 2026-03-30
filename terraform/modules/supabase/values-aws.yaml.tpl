@@ -22,19 +22,19 @@ hpa:
     targetMemoryUtilizationPercentage: 80
   storage:
     enabled: true
-    minReplicas: 2
+    minReplicas: 1
     maxReplicas: 6
     targetCPUUtilizationPercentage: 70
     targetMemoryUtilizationPercentage: 80
   functions:
     enabled: true
-    minReplicas: 2
+    minReplicas: 1
     maxReplicas: 6
     targetCPUUtilizationPercentage: 70
     targetMemoryUtilizationPercentage: 80
   imgproxy:
     enabled: true
-    minReplicas: 2
+    minReplicas: 1
     maxReplicas: 6
     targetCPUUtilizationPercentage: 70
     targetMemoryUtilizationPercentage: 80
@@ -51,13 +51,14 @@ ingress:
     alb.ingress.kubernetes.io/scheme: internet-facing
     alb.ingress.kubernetes.io/target-type: ip
     alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80}]'
-    alb.ingress.kubernetes.io/ssl-redirect: "443"
 
 # ------------------------------------------------------------------------------
 # Supabase Chart Values
 # All secrets from ESO-synced Kubernetes Secret
 # ------------------------------------------------------------------------------
 supabase:
+  ingress:
+    enabled: false
   secret:
     dashboard:
       secretRef: ${k8s_secret_name}
@@ -240,6 +241,7 @@ supabase:
       REGION: ${aws_region}
       AWS_DEFAULT_REGION: ${aws_region}
       AWS_SDK_LOAD_CONFIG: "1"
+      NODE_TLS_REJECT_UNAUTHORIZED: "0"
     analytics:
       DB_HOST: "${db_host}"
       DB_PORT: "${db_port}"

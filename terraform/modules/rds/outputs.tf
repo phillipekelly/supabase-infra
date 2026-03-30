@@ -39,5 +39,5 @@ output "db_name" {
 
 output "supabase_database_name" {
   description = "Name of the _supabase database created for analytics"
-  value       = postgresql_database.supabase.name
+  value       = "_supabase"
 }

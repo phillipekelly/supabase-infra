@@ -75,3 +75,8 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "db_master_username" {
+  description = "Master username for Aurora PostgreSQL — used in bootstrap Job search_path"
+  type        = string
+}
