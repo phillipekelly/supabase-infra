@@ -1,6 +1,6 @@
 # Supabase on AWS EKS
 
-A fully automated, production-oriented deployment of [Supabase](https://supabase.com/) on AWS EKS using Terraform IaC, Helm, Karpenter, and External Secrets Operator. Supports three isolated environments: `dev`, `sit`, and `prod`.
+An IaC-driven, production-oriented deployment of [Supabase](https://supabase.com/) on AWS EKS using Terraform IaC, Helm, Karpenter, and External Secrets Operator. Supports three isolated environments: `dev`, `sit`, and `prod`.
 
 ---
 
